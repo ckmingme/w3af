@@ -45,7 +45,7 @@ w3af 是web application attack and audit framework 的缩写，是一个检测�
         self._plugins_options = {'audit': {}, 'grep': {}, 'bruteforce': {},
                                  'crawl': {}, 'evasion': {}, 'mangle': {},
                                  'output': {}, 'attack': {}, 'auth': {},
-                                 'infrastructure': {}}  初始化储存结构；插件类型为key, 某个名称的插件启用了，它也许会有可选择的options，待看后面，它到底是怎么储存的 ＃ todo 待看
+                                 'infrastructure': {}}  初始化储存结构；插件类型为key, 某个名称的插件启用了，它也许会有可选择的options ＃ todo 待看
         # A dict with plugin types as keys and a list of plugin instances as
         # values
         self.plugins = {'audit': [], 'grep': [], 'bruteforce': [], 'crawl': [],
@@ -133,7 +133,7 @@ self.target是CoreTarget的一个实例，CoreTarget继承自Configurable类，�
                     # See documentation in the property below
                     self._out_queue = Queue() 初始化一个队列给_out_queue
 
-                    # Also use this method to clear observers  ＃ todo 待看
+                    # Also use this method to clear observers  ＃ todo
                     self._observers = []
 
 9. om.manager.set_w3af_core(self) om是个module，om.manager是一个线程池，即OutputManager的一个实例。 
@@ -181,3 +181,22 @@ w3af_core的uri_opener是ExtendedUrllib的一个实例，注释解释说这是�
 
 ***************至此w3afCore实例化完成***************
 """
+api入口实例化w3afCore后，会新开一个线程，运行/w3af/w3af/core/ui/api/utils/scans.py 里的start_scan_helper函数。
+start_scan_helper会初始化一个scan_info,然后设置scan_info,之后设置w3af_core的target的target_option,执行w3af_core的plugins的init_plugins
+方法，也就是加载配置。执行w3af_core.verify_environment()确认配置正确。执行w3af_core.start()
+
+console入口在实例化w3afCore后, /w3af/w3af/core/ui/console/rootMenu.py里_cmd_start会新开一个线程,运行_real_start方法。
+此方法会初始化组件（self._w3af.plugins.init_plugins()）,确认配置正确(self._w3af.verify_environment()),执行self._w3af.start()
+
+gui入口待看,应该也是应开一个线程,执行一个函数,他会初始化target和plugins的配置,确保配置正确后，会执行w3af_core的start()方法。
+
+w3af_core.start()：它会按顺序执行下面语句：
+self.scan_start_hook()   将self的属性进行一些变更(status,strategy)，运行一些函数，及是否是第一次scan而作不同的操作。
+self._first_scan = False
+self.strategy.start()
+time_spent = self.status.get_scan_time()
+om.out.information('Scan finished in %s' % time_spent)
+om.out.information('Stopping the core...')
+self.strategy.stop()
+self.scan_end_hook()
+self.status.scan_finished()

@@ -80,7 +80,7 @@ def start_scan_helper(target_urls, scan_profile, scan_info_setup):
                                        workdir=profile_path)
 
         # Override the target that's set in the profile
-        target_options = w3af_core.target.get_options()
+        target_options = w3af_core.target.get_options()  # todo 下面几句包括init_plugins都是比较重要的
         target_option = target_options['target']
 
         target_option.set_value([URL(u) for u in target_urls])
