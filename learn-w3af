@@ -1,0 +1,183 @@
+"""
+w3af 是web application attack and audit framework 的缩写，是一个检测服务器和web应用漏洞的开源工具，当然，它是用python写的。
+安装方法见官方指南: http://docs.w3af.org/en/latest/install.html
+他有三种调用方式，即gui(图形界面);console;api三种。分别对应下面三个启动的py文件
+/w3af/w3af/core/ui/console/console_ui.py
+/w3af/w3af/core/ui/gui/main.py
+/w3af/w3af/core/ui/api/resources/scans.py
+
+插件：
+1.audit：检测插件。使用爬取插件产生的信息以检测远程服务器和远程web应用上的漏洞。
+2.auth plugins：登录插件。可以扫描授权保护的web应用。它们会在扫描开始的时候登录，结束时注销，并定期检查当前会话活动。
+3.bruteforce plugins：暴力破解插件。自动抓取用户， 然后用解析到的远程web应用程序的信息以强力破解（用户，密码剖析等）。
+4.crawl plugins：抓取插件。用不同的技术来识别新的urls，forms,或者其他资源；以供audit和bruteforce phases利用。
+5.evasion plugins：闪避插件。即时修改请求以避过IPS检测。
+6.grep plugins：检索插件。分析每个请求和响应以查找错误，cookie，邮件，评论以及更多的关于目标网站的信息。
+7.infrastructure plugins：基础设施插件。使用不同的技术识别远程server的操作系统，http守护进程，web应用的防火墙，远程用户或者与目标网站关联的，但不在源码上展现的其他一些信息。
+8.mangle plugins：即时修改请求。
+9.output plugins：输出插件。允许用户配置框架输出结果的方式。
+
+
+三个不同的入口，传的参数都是target_urls, configuration.即要检测的url(s), 插件工具的各项配置。
+每次开始一个检测请求时，都会创建一个 w3afCore 的实例，即==> w3af_core = w3afCore()
+实例化w3afCore()的时候做的操作：self即 w3af_core ，w3afCore的实例
+1. self._home_directory()  确保有这个目录
+
+2. self._tmp_directory()  创建这个目录
+
+3. self.exception_handler = ExceptionHandler()  添加异常处理的handler
+
+4. self.profiles = CoreProfiles(self)  self.profiles 是 CoreProfiles 的一个实例，它的_w3af_core属性是这里的self,即w3af_core.
+
+5. self.plugins = CorePlugins(self)  self.plugins 是 CorePlugins 的一个实例，它的_w3af_core属性是self,即w3af_core. 
+实例化CorePlugins时做的操作有:（注意：下面的self是self.plugins）
+    self._w3af_core = w3af_core
+    self.initialized = False  还没初始化，应该是还没加载enabled plugins 的意思。
+    self._plugins_names_dict = None 声明
+    self._plugins_options = None 声明
+    self.plugins = None 声明
+    self.zero_enabled_plugins() ==> 这个method做的操作有: （下面的self仍是是self.plugins）
+        self._plugins_names_dict = {'audit': [], 'grep': [],
+                                    'bruteforce': [], 'crawl': [],
+                                    'evasion': [], 'mangle': [],
+                                    'output': [], 'auth': [],
+                                    'infrastructure': []}  初始化储存结构；插件类型为key, 插件名称为values
+        self._plugins_options = {'audit': {}, 'grep': {}, 'bruteforce': {},
+                                 'crawl': {}, 'evasion': {}, 'mangle': {},
+                                 'output': {}, 'attack': {}, 'auth': {},
+                                 'infrastructure': {}}  初始化储存结构；插件类型为key, 某个名称的插件启用了，它也许会有可选择的options，待看后面，它到底是怎么储存的 ＃ todo 待看
+        # A dict with plugin types as keys and a list of plugin instances as
+        # values
+        self.plugins = {'audit': [], 'grep': [], 'bruteforce': [], 'crawl': [],
+                        'evasion': [], 'mangle': [], 'output': [], 'auth': [],
+                        'infrastructure': []}  初始化储存结构；插件类型为key, 类别里启用的插件的实例为values
+        # After we zero all options and enabled plugins we need to call
+        # init_plugins again
+        self.initialized = False  这个的意思是每当self.plugins调用zero_enabled_plugins()方法时，都会将initialized设为False
+
+6. self.status = w3af_core_status(self) 
+实例化w3af_core_status时做的操作有: （注意：下面的self是self.status）
+def __init__(self, w3af_core, scans_completed=0):
+    # Store the core to be able to access the queues to get status
+    self._w3af_core = w3af_core
+        
+    # Init some internal values
+    self._is_running = False
+    self._paused = False
+    self._start_time_epoch = None
+    self.scans_completed = scans_completed
+        
+    # This indicates the plugin that is running right now for each
+    # plugin_type
+    self._running_plugin = {}
+    self._latest_ptype, self._latest_pname = None, None
+        
+    # The current fuzzable request that the core is analyzing at each phase
+    # where a phase means crawl/audit
+    self._current_fuzzable_request = {}
+可看出这是可重复使用的。crawl和audit刚开始的时候都很像的时候， 只是scans_completed不同。
+
+7. self.target = CoreTarget() 
+self.target是CoreTarget的一个实例，CoreTarget继承自Configurable类，是一个接口类，用于配置设置等。有set_options和get_options等方法。
+这里在为self.target加载配置实例。实例化CoreTarget时做的操作有:（下面的self是self.target）
+    def __init__(self):
+        # Set defaults for user configured variables
+        self.clear()  这个方法将cf.cf里的一些配置初始化：
+            def clear(self):
+                cf.cf.save('targets', [])
+                cf.cf.save('target_os', 'unknown')
+                cf.cf.save('target_framework', 'unknown')
+                cf.cf.save('target_domains', set())
+                cf.cf.save('baseURLs', [])
+
+        # Some internal variables
+        self._operating_systems = ['unknown', 'unix', 'windows']
+        self._programming_frameworks = ['unknown', 'php', 'asp', 'asp.net',
+                                        'java', 'jsp', 'cfm', 'ruby', 'perl']
+
+8. self.strategy = CoreStrategy(self)  顾名思义，核心策略。就是w3af 的workflow，里面有这样一段解释，感觉对后面理解非常有帮助：
+    "while new_things_found():
+         discovery()
+         bruteforce()
+     audit(things)"
+     创建一个w3afCore的实例w3af_core，设置它的初始strategy时，做的操作:（下面的self是self.strategy）
+        def __init__(self, w3af_core):
+            self._w3af_core = w3af_core
+        
+            self.set_consumers_to_none()
+        
+        def set_consumers_to_none(self):
+            # Consumer threads
+            self._grep_consumer = None
+            self._audit_consumer = None
+            self._auth_consumer = None
+
+            # Producer/consumer threads
+            self._discovery_consumer = None
+            self._bruteforce_consumer = None  
+            
+            上面是讲一些plugins consumer设为None
+            
+            # Producer threads 即_seed_producer是一个线程池
+            self._seed_producer = seed(self._w3af_core) seed是一个类，继承自multiprocessing.dummy,它可以启动一个线程。实例化seed时做的操作有：
+            下面的self是self._seed_producer：
+                def __init__(self, w3af_core):
+                    "
+                    :param w3af_core: The w3af core that we'll use for status reporting
+                    "
+                    super(seed, self).__init__(name='SeedController')
+                    self.name = 'Seed'
+
+                    self._w3af_core = w3af_core
+
+                    # See documentation in the property below
+                    self._out_queue = Queue() 初始化一个队列给_out_queue
+
+                    # Also use this method to clear observers  ＃ todo 待看
+                    self._observers = []
+
+9. om.manager.set_w3af_core(self) om是个module，om.manager是一个线程池，即OutputManager的一个实例。 
+将om.manager的_w3af_core属性设为w3af_core
+
+10. self.uri_opener = ExtendedUrllib()
+w3af_core的uri_opener是ExtendedUrllib的一个实例，注释解释说这是一个urllib2的wrapper，在／w3af/w3af/core/data/url/extended_urllib.py
+初始化ExtendedUrllib时做的操作:（self是self.uri_opener）
+    self.settings = opener_settings.OpenerSettings()  OpenerSettings是继承自Configurable的接口类，这里是用以配置opener，看细节是设置request钱的一些基本信息。
+    self._opener = None
+
+    # In exploit mode we disable some timeout/delay/error handling stuff
+    self.exploit_mode = False
+
+    # For error handling, the first "last response" is set to SUCCESS to
+    # allow the _should_stop_scan method to match it's "SFFFF...FFF" pattern
+    self._last_responses = deque(maxlen=MAX_RESPONSE_COLLECT)
+    self._last_responses.extend([ResponseMeta(True, SUCCESS)] * 100)
+    self._count_lock = threading.RLock()
+
+    # For rate limiting
+    self._rate_limit_last_time_called = 0.0
+    self._rate_limit_lock = threading.RLock()
+
+    # For timeout auto adjust and general stats
+    self._total_requests = 0
+
+    # Timeout is kept by host
+    self._host_timeout = {}
+    self._global_timeout = DEFAULT_TIMEOUT
+
+    # Used in the pause on HTTP error feature to keep track of when the
+    # core slept waiting for the remote end to be reachable
+    self._sleep_log = {}
+    self._clear_sleep_log()
+
+    # User configured options (in an indirect way)
+    self._grep_queue_put = None
+    self._evasion_plugins = []
+    self._user_paused = False
+    self._user_stopped = False
+    self._stop_exception = None
+
+11. self._first_scan = True 
+
+***************至此w3afCore实例化完成***************
+"""
