@@ -2,8 +2,8 @@
 w3af 是web application attack and audit framework 的缩写，是一个检测服务器和web应用漏洞的开源工具，当然，它是用python写的。
 安装方法见官方指南: http://docs.w3af.org/en/latest/install.html
 他有三种调用方式，即gui(图形界面);console;api三种。分别对应下面三个启动的py文件
-/w3af/w3af/core/ui/console/console_ui.py
 /w3af/w3af/core/ui/gui/main.py
+/w3af/w3af/core/ui/console/console_ui.py
 /w3af/w3af/core/ui/api/resources/scans.py
 
 插件：
