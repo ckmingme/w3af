@@ -53,21 +53,41 @@ w3af 是web application attack and audit framework 的缩写，是一个检测�
     self.status.scan_finished()  设置一次扫描完成后的状态变化
 
 二:
-2.1:
+2.1: self.strategy.start()：
+        self.strategy是整个w3af的核心，scan时所有真正的运作都在这里，注释上说基本遵循下面逻辑：
+            while new_things_found():
+                discovery()
+                bruteforce()
+            audit(things)
+        实例化CoreStrategy时会初始化所有consumers,绑定w3af_core(self.status._w3af_core=w3af_core)
+        start()方法会执行下面这些语句：
+            self.verify_target_server_up()  检测状态，确保target urls有效且网络正常。
+            self.alert_if_target_is_301_all()  检测是否把通过target url发送的请求重定向了，返回True or False 信息保存进kb.kb.append_uniq('core', 'core', info)
+            self._setup_grep()
+            self._setup_auth()
+            self._setup_crawl_infrastructure()
+            self._setup_audit()
+            self._setup_bruteforce()
+            self._setup_observers()
+            self._setup_404_detection()
+            self._seed_discovery()
+            self._fuzzable_request_router()
+
+
 2.2: w3af_core.scan_end_hook()做的操作：
-        self.worker_pool.terminate_join()
+        self.worker_pool.terminate_join()   terminate+join work_pool
         尝试执行：
-            om.manager.end_output_plugins()
-        self.exploit_phase_prerequisites()
+            om.manager.end_output_plugins()  保证所有输出处理完毕，所console组件没有enabled，则清空所有组件的memory
+        self.exploit_phase_prerequisites()   清空self.uri_opener的配置，将self.uri_opener设为exploit
         # Remove all references to plugins from memory
-        self.plugins.zero_enabled_plugins()
+        self.plugins.zero_enabled_plugins()  将单例的 组件设置 初始化(即清空)
         # No targets to be scanned.
-        self.target.clear()
+        self.target.clear()  清空target的配置
         # Finish the profiling
-        stop_profiling(self)
+        stop_profiling(self)  停止收集信息并且导出有用的信息。 w3af/w3af/core/controllers/profiling/core_stats.py里的dump_data就是输出此次scan的profile信息，基本上是从self.status里面获取的
         # Stop the parser subprocess
-        parser_cache.dpc.clear()
-        self.status.stop()
+        parser_cache.dpc.clear()  清空parser
+        self.status.stop() self.status._is_running设为False
 
 
 三：发现：
