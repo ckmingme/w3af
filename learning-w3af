@@ -1,4 +1,4 @@
-"""
+
 w3af 是web application attack and audit framework 的缩写，是一个检测服务器和web应用漏洞的开源工具，当然，它是用python写的。
 安装方法见官方指南: http://docs.w3af.org/en/latest/install.html
 他有三种调用方式，即gui(图形界面);console;api三种。分别对应下面三个启动的py文件
@@ -63,7 +63,19 @@ w3af 是web application attack and audit framework 的缩写，是一个检测�
         start()方法会执行下面这些语句：
             self.verify_target_server_up()  检测状态，确保target urls有效且网络正常。
             self.alert_if_target_is_301_all()  检测是否把通过target url发送的请求重定向了，返回True or False 信息保存进kb.kb.append_uniq('core', 'core', info)
-            self._setup_grep()
+
+            self._setup_grep()  启动grep consumer：
+                grep_plugins = self._w3af_core.plugins.plugins['grep']  ： 从w3af_core中取出设置的grep task列表(前面init过plugins):
+                self._grep_consumer = grep(grep_plugins, self._w3af_core):
+                    实例化grep(继承自BaseConsumer)，注册在self.strategy上。实例化grep时：
+                        创建grep consumer 的in_queue和out_queue队列,设置一些属性，不创建线程池。
+                        实例化一个信息过滤器ScalableBloomFilter()，注册在self._grep_consumer上
+
+                grep_qput = self._grep_consumer.in_queue_put
+                self._w3af_core.uri_opener.set_grep_queue_put(grep_qput)   这两行的操作是将grep consumer的in_queue_put方法注册在uri_opener的_in_queue_put方法上，也就是uri_opener可以往grep consumer的in_queue塞消息。
+                self._grep_consumer.start()  启动线程
+
+
             self._setup_auth()
             self._setup_crawl_infrastructure()
             self._setup_audit()
