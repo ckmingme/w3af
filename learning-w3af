@@ -110,7 +110,7 @@ w3af 是web application attack and audit framework 的缩写，是一个检测�
         1).self.worker_pool.terminate_join()   terminate+join work_pool
            尝试执行：
                om.manager.end_output_plugins()  保证所有输出处理完毕，若所console组件没有enabled，则清空所有组件的memory
-        2).self.exploit_phase_prerequisites()   清空self.uri_opener的配置，将self.uri_opener设为exploit
+        2).self.exploit_phase_prerequisites()   清空self.uri_opener的配置，将self.uri_opener设为exploit_mode
         # Remove all references to plugins from memory
         3).self.plugins.zero_enabled_plugins()  将单例的 组件设置 初始化(即清空)
         # No targets to be scanned.
@@ -132,10 +132,20 @@ w3af 是web application attack and audit framework 的缩写，是一个检测�
 1.consumers的线程池是怎么互相工作的。 ==>基本是这样：
     self.strategy._seed_discovery()开始产出fr(fuzzable_request)
     self._fuzzable_request_router() 分配fr,每个output consumers都会添加
-    每个consumers的in_queue里有东西时，就会消费它
+    consumer消费in_queue里的东西._out_queue保存POISON_PILL;(plugin_name, fuzzable_request, AsyncResult);An ExceptionData instance.
     用kb.kb里对应的方法记录
 2.consumers产出数据时，是怎么送到DBKnowledgeBase那里的，又是怎么从那里拿数据的。==>直接忘kb.kb对应的plugins里面加。
 3.实例化一个w3afCore时默认设置self.scans_completed=0,每完成一次完全的扫描会加1.这个有什么重要作用，还是只是一个记录完成扫描的次数，别的全部清空的w3afCore单例模式。
 
 
 五：总结：
+w3af总的架构设计模式是策略模式，开启一次scan会使用w3afCore的一个实例化对象当作工作台，连接所有较大型的独立存在的部分。
+核心工作部分是self.strategy,它控制着所有启动的组件. self.plugins保存起用的组件相关信息。
+self.opener_uri是保存request前基本配置,以及发送网络请求的。
+
+下一步：
+1.具体每个plugin是怎么开始工作的，它和对应的consumer实例之间是怎样的关系。
+2.每个consumer工作流程是怎样的，它会涉及到继承自Process的工作流程，再花点功夫应该可以理解得更深入些。
+3.信息交互大概原理知道了，但具体细节不清晰，不过这条和1是互补的，可以放在一起作为目标。
+4.exploit模式是怎么运行的？
+5.可以大量搜索找答案了。
