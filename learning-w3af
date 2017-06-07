@@ -33,7 +33,8 @@ w3af 是web application attack and audit framework 的缩写，是一个检测�
         self.plugins = CorePlugins(self)  初始化组件配置
         self.status = w3af_core_status(self)  初始化状态管理
         self.target = CoreTarget()  继承自Configurable的接口类，初始化target信息的储存格式
-        self.strategy = CoreStrategy(self)  初始化consumers（'discovery', 'audit', 'auth', 'bruteforce', 'grep'）和一些配置，这是真正处理任务的地方。见2.1：
+        self.strategy = CoreStrategy(self)  初始化consumers（'discovery', 'audit', 'auth', 'bruteforce', 'grep'）和一些配置，这里是真正处理任务的地方。见2.1：
+            另还有重要一点，会实例化seed挂在strategy的self._seed_producer上。seed继承自Process，实例化时会创建一个生产者线程池和一个供消费的队列(self._seed_producer._out_queue)；用于将target_urls转换成(用seed_output_queue方法)fuzzableRequest，放入队列并用kb.kb.add_fuzzable_request记录
     5).将新的w3afCore实例绑定在om.manager的_w3af_core属性上：
         om.manager.set_w3af_core(self)
     6).注册uri_opener:
@@ -42,15 +43,15 @@ w3af 是web application attack and audit framework 的缩写，是一个检测�
         self._first_scan = True
 1.3:三个入口的操作大同小异，开始scan时都会新开一个线程，执行一个函数或方法，用以初始化组件(self.plugins.init_plugins()),确认环境配置(w3af_core.verify_environment())，然后执行w3af_core.start().
 1.4:w3af_core.start()：主要执行下面语句：
-    self.scan_start_hook()   启动一次扫描前做的操作
-    self._first_scan = False 开始第一次scan
-    self.strategy.start()  正式开始扫描，核心任务处理： 见2.1
-    time_spent = self.status.get_scan_time()  本次扫描消耗的时间
-    om.out.information('Scan finished in %s' % time_spent)
-    om.out.information('Stopping the core...')
-    self.strategy.stop()  完成一次扫描，停掉consumer_instance的线程池（把task全部拿出来，停掉loop）,初始化consumers
-    self.scan_end_hook()  完成一次扫描后做的操作： 见2.2
-    self.status.scan_finished()  设置一次扫描完成后的状态变化
+    1).self.scan_start_hook()   启动一次扫描前做的操作
+    2).self._first_scan = False 开始第一次scan
+    3).self.strategy.start()  正式开始扫描，核心任务处理： 见2.1
+    4).time_spent = self.status.get_scan_time()  本次扫描消耗的时间
+    5).om.out.information('Scan finished in %s' % time_spent)
+       om.out.information('Stopping the core...')
+    5).self.strategy.stop()  完成一次扫描，停掉consumer_instance的线程池（把task全部拿出来，停掉loop）,初始化consumers
+    7).self.scan_end_hook()  完成一次扫描后做的操作： 见2.2
+    8).self.status.scan_finished()  设置一次扫描完成后的状态变化
 
 二:
 2.1: self.strategy.start()：
@@ -61,54 +62,80 @@ w3af 是web application attack and audit framework 的缩写，是一个检测�
             audit(things)
         实例化CoreStrategy时会初始化所有consumers,绑定w3af_core(self.status._w3af_core=w3af_core)
         start()方法会执行下面这些语句：
-            self.verify_target_server_up()  检测状态，确保target urls有效且网络正常。
-            self.alert_if_target_is_301_all()  检测是否把通过target url发送的请求重定向了，返回True or False 信息保存进kb.kb.append_uniq('core', 'core', info)
+            1).self.verify_target_server_up()  检测状态，确保target urls有效且网络正常。
 
-            self._setup_grep()  启动grep consumer：
-                grep_plugins = self._w3af_core.plugins.plugins['grep']  ： 从w3af_core中取出设置的grep task列表(前面init过plugins):
-                self._grep_consumer = grep(grep_plugins, self._w3af_core):
-                    实例化grep(继承自BaseConsumer)，注册在self.strategy上。实例化grep时：
-                        创建grep consumer 的in_queue和out_queue队列,设置一些属性，不创建线程池。
-                        实例化一个信息过滤器ScalableBloomFilter()，注册在self._grep_consumer上
+            2).self.alert_if_target_is_301_all()  检测是否把通过target url发送的请求重定向了，返回True or False 信息保存进kb.kb.append_uniq('core', 'core', info) （kb.kb是DBKnowledgeBase的实例，见3.1）
 
-                grep_qput = self._grep_consumer.in_queue_put
-                self._w3af_core.uri_opener.set_grep_queue_put(grep_qput)   这两行的操作是将grep consumer的in_queue_put方法注册在uri_opener的_in_queue_put方法上，也就是uri_opener可以往grep consumer的in_queue塞消息。
-                self._grep_consumer.start()  启动线程
+            3).self._setup_grep()  启动grep consumer：
+                  grep_plugins = self._w3af_core.plugins.plugins['grep']  ： 从w3af_core中取出设置的grep plugins列表(前面init过plugins):
+                  self._grep_consumer = grep(grep_plugins, self._w3af_core):
+                      实例化grep(继承自BaseConsumer)，注册在self.strategy上。实例化grep时：
+                          创建grep consumer 的in_queue和out_queue队列,设置一些属性，不创建线程池。
+                          实例化一个信息过滤器ScalableBloomFilter()，注册在self._grep_consumer上
+                  grep_qput = self._grep_consumer.in_queue_put
+                  self._w3af_core.uri_opener.set_grep_queue_put(grep_qput)   这两行的操作是将grep consumer的in_queue_put方法注册在uri_opener的_in_queue_put方法上，也就是uri_opener可以往grep consumer的in_queue塞消息。
+                  self._grep_consumer.start()  启动线程
 
+            4).self._setup_auth()  启动auth consumer:
+                与启动grep_consumer大同小异，不创建线程池
 
-            self._setup_auth()
-            self._setup_crawl_infrastructure()
-            self._setup_audit()
-            self._setup_bruteforce()
-            self._setup_observers()
-            self._setup_404_detection()
-            self._seed_discovery()
-            self._fuzzable_request_router()
+            5).self._setup_crawl_infrastructure()  启动discovery consumer:
+                   crawl_plugins = self._w3af_core.plugins.plugins['crawl']
+                   infrastructure_plugins = self._w3af_core.plugins.plugins['infrastructure']  这两行时获取crawl 和 infrastructure 组件
+
+                  if crawl_plugins or infrastructure_plugins:
+                      discovery_plugins = infrastructure_plugins
+                      discovery_plugins.extend(crawl_plugins)
+                      self._discovery_consumer = crawl_infrastructure(discovery_plugins,
+                                                                      self._w3af_core,
+                                                                      cf.cf.get('max_discovery_time'))  将crawl 和 infrastructure 的 plugins instance 合成一个列表，当成参数传入crawl_infrastructure 里实例化(要创建线程池)，注册在self.strategy上，称为self._discovery_consumer
+                      self._discovery_consumer.start()  启动线程
+
+            6).self._setup_audit()  启动audit consumer:
+                与启动grep_consumer大同小异，创建线程池
+
+            7).self._setup_bruteforce()  启动bruteforce consumer:
+                与启动grep_consumer大同小异，不创建线程池
+
+            8).self._setup_observers()  将上面创建的consumers(self._audit_consumer, self._bruteforce_consumer, self._discovery_consumer, self._grep_consumer)的_observers 添加上strategy的所有observer（在strategy的_observers）
+
+            9).self._setup_404_detection()  检测targets里面的url是否有效，会不会是404页面
+
+            10).self._seed_discovery()  见1.2.4说明，开始生产fuzzable_request，整个scan开始动起来了(之前一直在阻塞、等待)
+
+            11).self._fuzzable_request_router()  这个方法将consumers分为两类(有重合)，_input 和 _output。 _input产出fuzzable_request, _output里的consumers再分别将它加入到自己的in_queue里(in_queue_put方法)。保证产出fr的consumers运行完，并且产出的每个fr均加入到了_output的consumers的in_queue里
 
 
 2.2: w3af_core.scan_end_hook()做的操作：
-        self.worker_pool.terminate_join()   terminate+join work_pool
-        尝试执行：
-            om.manager.end_output_plugins()  保证所有输出处理完毕，所console组件没有enabled，则清空所有组件的memory
-        self.exploit_phase_prerequisites()   清空self.uri_opener的配置，将self.uri_opener设为exploit
+        1).self.worker_pool.terminate_join()   terminate+join work_pool
+           尝试执行：
+               om.manager.end_output_plugins()  保证所有输出处理完毕，若所console组件没有enabled，则清空所有组件的memory
+        2).self.exploit_phase_prerequisites()   清空self.uri_opener的配置，将self.uri_opener设为exploit
         # Remove all references to plugins from memory
-        self.plugins.zero_enabled_plugins()  将单例的 组件设置 初始化(即清空)
+        3).self.plugins.zero_enabled_plugins()  将单例的 组件设置 初始化(即清空)
         # No targets to be scanned.
-        self.target.clear()  清空target的配置
+        4).self.target.clear()  清空target的配置
         # Finish the profiling
-        stop_profiling(self)  停止收集信息并且导出有用的信息。 w3af/w3af/core/controllers/profiling/core_stats.py里的dump_data就是输出此次scan的profile信息，基本上是从self.status里面获取的
+        5).stop_profiling(self)  停止收集信息并且导出有用的信息。 w3af/w3af/core/controllers/profiling/core_stats.py里的dump_data就是输出此次scan的profile信息，基本上是从self.status里面获取的
         # Stop the parser subprocess
-        parser_cache.dpc.clear()  清空parser
-        self.status.stop() self.status._is_running设为False
+        6).parser_cache.dpc.clear()  清空parser
+        7).self.status.stop() self.status._is_running设为False
 
 
 三：发现：
-1./w3af/w3af/core/data/kb/knowledge_base.py 里的DBKnowledgeBase：
+3.1：/w3af/w3af/core/data/kb/knowledge_base.py 里的DBKnowledgeBase：
 储存plugins发送过来的数据，也是plugins用来交换数据的唯一方式。
-2.
+3.2：self.strategy里的_observers是什么时候添加的？好像看到说明observers是监控硬盘、内存使用和读写情况的，那段话在哪。
 
 
-四：存疑：
-1.consumers的线程池是怎么互相工作的。
-2.consumers产出数据时，是怎么送到DBKnowledgeBase那里的，又是怎么从那里拿数据的。
+四：存疑(基本解决了)：
+1.consumers的线程池是怎么互相工作的。 ==>基本是这样：
+    self.strategy._seed_discovery()开始产出fr(fuzzable_request)
+    self._fuzzable_request_router() 分配fr,每个output consumers都会添加
+    每个consumers的in_queue里有东西时，就会消费它
+    用kb.kb里对应的方法记录
+2.consumers产出数据时，是怎么送到DBKnowledgeBase那里的，又是怎么从那里拿数据的。==>直接忘kb.kb对应的plugins里面加。
 3.实例化一个w3afCore时默认设置self.scans_completed=0,每完成一次完全的扫描会加1.这个有什么重要作用，还是只是一个记录完成扫描的次数，别的全部清空的w3afCore单例模式。
+
+
+五：总结：
